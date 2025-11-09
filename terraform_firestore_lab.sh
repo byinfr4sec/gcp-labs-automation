@@ -136,4 +136,4 @@ else
 fi
 
 echo ""
-echo "🎯 Lab concluído com sucesso! by inf4SeC"
+echo "🎯 Lab concluído com sucesso - by inf4SeC!"
