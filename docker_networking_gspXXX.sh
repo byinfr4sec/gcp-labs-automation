@@ -6,6 +6,13 @@ echo "🐳 Docker Essentials: Container Networking"
 echo "==============================================="
 echo ""
 
+# 🧹 LIMPEZA PREVENTIVA
+echo "🧹 Limpando possíveis containers e redes antigas..."
+docker rm -f container1 container2 container3 container4 >/dev/null 2>&1 || true
+docker network rm my-net >/dev/null 2>&1 || true
+echo "✅ Ambiente limpo e pronto para iniciar!"
+echo ""
+
 # -------------------------------
 # 1️⃣ - CONFIGURAÇÃO INICIAL
 # -------------------------------
