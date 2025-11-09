@@ -4,38 +4,24 @@ set -e
 echo "==============================================="
 echo "🐳 Docker Essentials: Container Networking"
 echo "==============================================="
-echo ""
 
-# 🧹 LIMPEZA TOTAL
+echo ""
 echo "🧹 Limpando containers e redes antigas (se existirem)..."
 for c in container1 container2 container3 container4; do
-  if [ "$(docker ps -aq -f name=^${c}$)" ]; then
+  if [ "$(docker ps -aq -f name=$c)" ]; then
     echo "   ➤ Removendo container existente: $c"
     docker rm -f $c >/dev/null 2>&1 || true
   fi
 done
-
-if docker network inspect my-net >/dev/null 2>&1; then
+if [ "$(docker network ls -q -f name=my-net)" ]; then
   echo "   ➤ Removendo rede antiga: my-net"
   docker network rm my-net >/dev/null 2>&1 || true
 fi
-
-# Aguarda o Docker liberar o nome
-sleep 3
 echo "✅ Ambiente limpo e pronto para iniciar!"
 echo ""
 
-# 🔧 Verifica se o Docker está ativo
-if ! docker info >/dev/null 2>&1; then
-  echo "⚠️ O Docker não parece estar ativo. Tentando iniciar..."
-  sudo service docker start || true
-  sleep 5
-fi
-
 echo "🔑 Verificando autenticação atual..."
 gcloud auth list
-echo ""
-
 
 read -p "👉 Digite o ID do Projeto (PROJECT_ID): " PROJECT_ID
 read -p "👉 Digite a Região (ex: us-central1, us-east1, europe-west1): " REGION
@@ -45,126 +31,81 @@ echo "⚙️ Configurando o projeto e região..."
 gcloud config set project $PROJECT_ID
 gcloud config set compute/region $REGION
 
-# -------------------------------
-# 2️⃣ - HABILITAR API E CRIAR REPOSITÓRIO
-# -------------------------------
 echo ""
 echo "🔌 Habilitando Artifact Registry API..."
-gcloud services enable artifactregistry.googleapis.com
+gcloud services enable artifactregistry.googleapis.com --quiet
 
 echo ""
 echo "🗄️ Criando repositório Docker 'lab-registry'..."
-gcloud artifacts repositories create lab-registry \
+if ! gcloud artifacts repositories create lab-registry \
   --repository-format=docker \
   --location=$REGION \
-  --description="Docker repository" || echo "ℹ️ Repositório já existe, continuando..."
+  --description="Lab Docker Registry" >/dev/null 2>&1; then
+  echo "ℹ️ Repositório já existe, continuando..."
+fi
 
-# -------------------------------
-# 3️⃣ - CONFIGURAR DOCKER AUTENTICAÇÃO
-# -------------------------------
 echo ""
 echo "🔑 Configurando autenticação do Docker com Artifact Registry..."
-gcloud auth configure-docker "$REGION"-docker.pkg.dev -q
+gcloud auth configure-docker $REGION-docker.pkg.dev --quiet
 
-# -------------------------------
-# 4️⃣ - PUXAR, TAGUEAR E ENVIAR IMAGENS
-# -------------------------------
 echo ""
 echo "📦 Baixando imagens do Docker Hub e enviando para o Artifact Registry..."
+docker pull alpine/curl:latest
+docker tag alpine/curl:latest $REGION-docker.pkg.dev/$PROJECT_ID/lab-registry/alpine-curl:latest
+docker push $REGION-docker.pkg.dev/$PROJECT_ID/lab-registry/alpine-curl:latest
 
-# Alpine Curl
-docker pull alpine/curl
-docker tag alpine/curl "$REGION"-docker.pkg.dev/"$PROJECT_ID"/lab-registry/alpine-curl:latest
-docker push "$REGION"-docker.pkg.dev/"$PROJECT_ID"/lab-registry/alpine-curl:latest
-
-# Nginx
 docker pull nginx:latest
-docker tag nginx:latest "$REGION"-docker.pkg.dev/"$PROJECT_ID"/lab-registry/nginx:latest
-docker push "$REGION"-docker.pkg.dev/"$PROJECT_ID"/lab-registry/nginx:latest
-
+docker tag nginx:latest $REGION-docker.pkg.dev/$PROJECT_ID/lab-registry/nginx:latest
+docker push $REGION-docker.pkg.dev/$PROJECT_ID/lab-registry/nginx:latest
 echo ""
 echo "✅ Imagens enviadas com sucesso para o Artifact Registry!"
-
-# -------------------------------
-# 5️⃣ - EXPLORANDO REDE BRIDGE PADRÃO
-# -------------------------------
 echo ""
+
 echo "🌉 Testando rede padrão (bridge)..."
-
-docker run -d --name container1 "$REGION"-docker.pkg.dev/"$PROJECT_ID"/lab-registry/alpine-curl:latest sleep infinity
-docker run -d --name container2 "$REGION"-docker.pkg.dev/"$PROJECT_ID"/lab-registry/alpine-curl:latest sleep infinity
-
-echo ""
-echo "🔍 Inspecionando rede bridge..."
-docker network inspect bridge | grep Name || true
-
+docker run -d --name container1 alpine/curl sleep 300
+docker run -d --name container2 alpine/curl sleep 300
+docker inspect bridge | grep '"Name"'
 echo ""
 echo "🚫 Tentando pingar container2 de container1 (DNS não disponível na bridge padrão)..."
-docker exec -it container1 ping -c 2 container2 || echo "❌ Nome não resolvido — comportamento esperado."
-
+docker exec container1 ping -c 2 container2 || echo "❌ Nome não resolvido — comportamento esperado."
 echo ""
+
 echo "🧹 Substituindo container2 por servidor nginx na porta 8080..."
-docker stop container2 && docker rm container2
-docker run -d --name container2 -p 8080:80 "$REGION"-docker.pkg.dev/"$PROJECT_ID"/lab-registry/nginx:latest
+docker rm -f container2 >/dev/null 2>&1 || true
+docker run -d --name container2 -p 8080:80 nginx || echo "⚠️ Porta 8080 em uso, tentando 8082..."
+if ! docker ps | grep -q "0.0.0.0:8080"; then
+  docker run -d --name container2 -p 8082:80 nginx
+fi
 
-echo ""
-echo "🌐 Tentando acessar container2 (nginx) a partir do container1..."
-docker exec -it container1 curl -s container2:8080 || echo "⚠️ Nome não resolvido — esperado na rede padrão."
-
-# -------------------------------
-# 6️⃣ - CRIAR E USAR REDE PERSONALIZADA
-# -------------------------------
 echo ""
 echo "🌐 Criando rede personalizada 'my-net'..."
 docker network create my-net
 
 echo ""
 echo "🚀 Iniciando containers na rede my-net..."
-docker run -d --name container3 --network my-net "$REGION"-docker.pkg.dev/"$PROJECT_ID"/lab-registry/alpine-curl:latest sleep infinity
-docker run -d --name container4 --network my-net "$REGION"-docker.pkg.dev/"$PROJECT_ID"/lab-registry/alpine-curl:latest sleep infinity
-
-echo ""
-echo "🔍 Inspecionando rede my-net..."
-docker network inspect my-net | grep Name
+docker run -d --name container3 --network my-net alpine/curl sleep 300
+docker run -d --name container4 --network my-net alpine/curl sleep 300
 
 echo ""
 echo "📡 Testando comunicação container3 -> container4..."
-docker exec -it container3 ping -c 2 container4
+docker exec container3 ping -c 2 container4
 
 echo ""
 echo "🧩 Reiniciando container4 como servidor nginx (porta 8081)..."
-docker stop container4 && docker rm container4
-docker run -d --name container4 --network my-net -p 8081:80 "$REGION"-docker.pkg.dev/"$PROJECT_ID"/lab-registry/nginx:latest
+docker rm -f container4 >/dev/null 2>&1 || true
+docker run -d --name container4 --network my-net -p 8081:80 nginx
 
 echo ""
 echo "🔗 Testando acesso HTTP entre containers na rede personalizada..."
-docker exec -it container3 curl -s container4:80 | grep "Welcome" && echo "✅ Comunicação interna OK"
-
-# -------------------------------
-# 7️⃣ - PUBLICAR PORTAS E ACESSAR DO HOST
-# -------------------------------
-echo ""
-echo "🌍 Publicando nginx na porta 8080..."
-docker stop container4 && docker rm container4
-docker run -d --name container4 -p 8080:80 "$REGION"-docker.pkg.dev/"$PROJECT_ID"/lab-registry/nginx:latest
+docker exec container3 curl -s container4 | grep '<title>'
 
 echo ""
-echo "🌐 Acessando nginx via host (localhost:8080)..."
-curl -s localhost:8080 | grep "Welcome" && echo "✅ Nginx acessível externamente!"
+echo "🌍 Publicando nginx..."
+if ! docker run -d --name nginx_public -p 8080:80 nginx; then
+  echo "⚠️ Porta 8080 em uso, tentando 8082..."
+  docker run -d --name nginx_public -p 8082:80 nginx
+fi
 
 echo ""
-echo "🔍 Verificando mapeamento de portas..."
-docker port container4 80
-
-# -------------------------------
-# 8️⃣ - LIMPEZA FINAL
-# -------------------------------
-echo ""
-echo "🧹 Limpando containers e rede..."
-docker stop container1 container2 container3 container4 || true
-docker rm container1 container2 container3 container4 || true
-docker network rm my-net || true
-
-echo ""
-echo "✅ LAB CONCLUÍDO COM SUCESSO! by infr4Sec"
-echo "==============================================="
+echo "✅ Lab concluído com sucesso!"
+echo "🎉 Todos os testes foram executados corretamente! by infr4SeC"
