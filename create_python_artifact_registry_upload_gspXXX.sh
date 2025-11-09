@@ -109,5 +109,5 @@ echo "🔍 Verificando pacotes publicados..."
 gcloud artifacts packages list --repository=my-python-repo --location=$REGION
 
 echo ""
-echo "✅ LAB CONCLUÍDO COM SUCESSO!"
+echo "✅ LAB CONCLUÍDO COM SUCESSO! by infr4Sec"
 echo "==============================================="
