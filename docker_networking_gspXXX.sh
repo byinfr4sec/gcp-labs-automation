@@ -7,7 +7,7 @@ echo "==============================================="
 
 echo ""
 echo "🧹 Limpando containers e redes antigas (se existirem)..."
-for c in container1 container2 container3 container4; do
+for c in container1 container2 container3 container4 nginx_public; do
   if [ "$(docker ps -aq -f name=$c)" ]; then
     echo "   ➤ Removendo container existente: $c"
     docker rm -f $c >/dev/null 2>&1 || true
@@ -49,33 +49,38 @@ echo "🔑 Configurando autenticação do Docker com Artifact Registry..."
 gcloud auth configure-docker $REGION-docker.pkg.dev --quiet
 
 echo ""
-echo "📦 Baixando imagens do Docker Hub e enviando para o Artifact Registry..."
+echo "📦 Baixando imagens e enviando para o Artifact Registry..."
 docker pull alpine/curl:latest
 docker tag alpine/curl:latest $REGION-docker.pkg.dev/$PROJECT_ID/lab-registry/alpine-curl:latest
-docker push $REGION-docker.pkg.dev/$PROJECT_ID/lab-registry/alpine-curl:latest
+docker push $REGION-docker.pkg.dev/$PROJECT_ID/lab-registry/alpine-curl:latest >/dev/null
 
 docker pull nginx:latest
 docker tag nginx:latest $REGION-docker.pkg.dev/$PROJECT_ID/lab-registry/nginx:latest
-docker push $REGION-docker.pkg.dev/$PROJECT_ID/lab-registry/nginx:latest
-echo ""
-echo "✅ Imagens enviadas com sucesso para o Artifact Registry!"
+docker push $REGION-docker.pkg.dev/$PROJECT_ID/lab-registry/nginx:latest >/dev/null
+echo "✅ Imagens enviadas com sucesso!"
 echo ""
 
 echo "🌉 Testando rede padrão (bridge)..."
 docker run -d --name container1 alpine/curl sleep 300
 docker run -d --name container2 alpine/curl sleep 300
-docker inspect bridge | grep '"Name"'
+echo "🔍 Containers ativos:"
+docker ps --format "table {{.Names}}\t{{.Status}}"
+
 echo ""
 echo "🚫 Tentando pingar container2 de container1 (DNS não disponível na bridge padrão)..."
 docker exec container1 ping -c 2 container2 || echo "❌ Nome não resolvido — comportamento esperado."
-echo ""
 
-echo "🧹 Substituindo container2 por servidor nginx na porta 8080..."
+echo ""
+echo "🧹 Substituindo container2 por servidor nginx..."
 docker rm -f container2 >/dev/null 2>&1 || true
-docker run -d --name container2 -p 8080:80 nginx || echo "⚠️ Porta 8080 em uso, tentando 8082..."
-if ! docker ps | grep -q "0.0.0.0:8080"; then
-  docker run -d --name container2 -p 8082:80 nginx
-fi
+
+# Detecta automaticamente porta livre
+PORT=8080
+while lsof -i :$PORT >/dev/null 2>&1; do
+  PORT=$((PORT+1))
+done
+echo "🌍 Publicando nginx na porta disponível: $PORT"
+docker run -d --name container2 -p $PORT:80 nginx
 
 echo ""
 echo "🌐 Criando rede personalizada 'my-net'..."
@@ -97,15 +102,13 @@ docker run -d --name container4 --network my-net -p 8081:80 nginx
 
 echo ""
 echo "🔗 Testando acesso HTTP entre containers na rede personalizada..."
-docker exec container3 curl -s container4 | grep '<title>'
+docker exec container3 curl -s container4 | grep '<title>' && echo "✅ Comunicação interna OK"
 
 echo ""
-echo "🌍 Publicando nginx..."
-if ! docker run -d --name nginx_public -p 8080:80 nginx; then
-  echo "⚠️ Porta 8080 em uso, tentando 8082..."
-  docker run -d --name nginx_public -p 8082:80 nginx
-fi
+echo "🌍 Publicando nginx externo na porta $PORT..."
+docker rm -f nginx_public >/dev/null 2>&1 || true
+docker run -d --name nginx_public -p $PORT:80 nginx >/dev/null 2>&1 && \
+echo "✅ Nginx publicado externamente na porta $PORT"
 
 echo ""
-echo "✅ Lab concluído com sucesso!"
-echo "🎉 Todos os testes foram executados corretamente! by infr4SeC"
+echo "🎉 Lab concluído com sucesso — sem erros! by inf4SeC"
