@@ -6,19 +6,36 @@ echo "🐳 Docker Essentials: Container Networking"
 echo "==============================================="
 echo ""
 
-# 🧹 LIMPEZA PREVENTIVA
-echo "🧹 Limpando possíveis containers e redes antigas..."
-docker rm -f container1 container2 container3 container4 >/dev/null 2>&1 || true
-docker network rm my-net >/dev/null 2>&1 || true
+# 🧹 LIMPEZA TOTAL
+echo "🧹 Limpando containers e redes antigas (se existirem)..."
+for c in container1 container2 container3 container4; do
+  if [ "$(docker ps -aq -f name=^${c}$)" ]; then
+    echo "   ➤ Removendo container existente: $c"
+    docker rm -f $c >/dev/null 2>&1 || true
+  fi
+done
+
+if docker network inspect my-net >/dev/null 2>&1; then
+  echo "   ➤ Removendo rede antiga: my-net"
+  docker network rm my-net >/dev/null 2>&1 || true
+fi
+
+# Aguarda o Docker liberar o nome
+sleep 3
 echo "✅ Ambiente limpo e pronto para iniciar!"
 echo ""
 
-# -------------------------------
-# 1️⃣ - CONFIGURAÇÃO INICIAL
-# -------------------------------
+# 🔧 Verifica se o Docker está ativo
+if ! docker info >/dev/null 2>&1; then
+  echo "⚠️ O Docker não parece estar ativo. Tentando iniciar..."
+  sudo service docker start || true
+  sleep 5
+fi
+
 echo "🔑 Verificando autenticação atual..."
 gcloud auth list
 echo ""
+
 
 read -p "👉 Digite o ID do Projeto (PROJECT_ID): " PROJECT_ID
 read -p "👉 Digite a Região (ex: us-central1, us-east1, europe-west1): " REGION
